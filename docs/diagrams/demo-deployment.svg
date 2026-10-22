@@ -1,0 +1,215 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="860" viewBox="0 0 1400 860" font-family="'Noto Sans CJK SC','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif">
+<style>
+.bg{fill:#FFFFFF}
+.grp{fill:#F8FAFC;stroke:#64748B;stroke-width:1.2;stroke-dasharray:6 4}
+.box{fill:#FFFFFF;stroke:#94A3B8;stroke-width:1.2}
+.ops{fill:#F1F5F9;stroke:#94A3B8;stroke-width:1.2}
+.fs{fill:#EEF4FF;stroke:#3370FF;stroke-width:1.4}
+.agent{fill:#FFF7EB;stroke:#FF9900;stroke-width:1.8}
+.mcp{fill:#F2F8F1;stroke:#6AA84F;stroke-width:1.3}
+.fault{fill:#FEF2F2;stroke:#DC2626;stroke-width:1.2}
+.t{fill:#111827;font-size:14px;font-weight:700}
+.ti{fill:#111827;font-size:12.5px;font-weight:700}
+.s{fill:#374151;font-size:12px}
+.xs{fill:#4B5563;font-size:11px}
+.code{fill:#1F2937;font-size:11px;font-family:'DejaVu Sans Mono',monospace}
+.lbl{fill:#374151;font-size:11px}
+.red{fill:#B91C1C;font-size:11.5px;font-weight:700}
+.h{fill:#0F172A;font-size:19px;font-weight:700}
+.ln{stroke:#475569;stroke-width:1.6;fill:none}
+.dash{stroke:#475569;stroke-width:1.4;fill:none;stroke-dasharray:5 4}
+.mk{fill:#475569}
+</style>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" class="mk"/></marker></defs>
+<rect width="1400" height="860" class="bg"/>
+<text x="20" y="36" class="h">Demo 部署架构：CloudFormation 栈 aiops-demo（us-east-1，无未认证的公网端点）</text>
+
+<!-- col0: operator scripts -->
+<rect x="20" y="60" width="230" height="460" rx="10" class="ops"/>
+<text x="34" y="84" class="t">演示操作（运维人员本机）</text>
+<text x="34" y="104" class="xs">AWS CLI v2 + Python 3.12</text>
+<text x="34" y="134" class="code">deploy.sh</text>
+<text x="34" y="151" class="xs">打包并部署整个栈</text>
+<text x="34" y="180" class="code">scripts/setup-secrets.sh</text>
+<text x="34" y="197" class="xs">交互录入 Webhook 与飞书凭证</text>
+<text x="34" y="226" class="code">scripts/register-mcp.sh</text>
+<text x="34" y="243" class="xs">注册两个 MCP，开放只读工具</text>
+<text x="34" y="272" class="code">scripts/inject-fault.sh</text>
+<text x="34" y="289" class="xs">模拟发布 1.4.0（注入故障）</text>
+<text x="34" y="318" class="code">scripts/rollback.sh</text>
+<text x="34" y="335" class="xs">回滚到 1.3.2</text>
+<text x="34" y="364" class="code">scripts/test-mcp.sh</text>
+<text x="34" y="381" class="code">scripts/test-feishu.sh</text>
+<text x="34" y="398" class="xs">冒烟测试</text>
+<text x="34" y="427" class="code">scripts/destroy.sh</text>
+<text x="34" y="444" class="xs">删除栈与制品桶</text>
+<text x="34" y="480" class="xs">Skill 在 DevOps Agent Web App</text>
+<text x="34" y="497" class="xs">（Knowledge → Skills）上传</text>
+
+<!-- col0: feishu -->
+<rect x="20" y="550" width="230" height="250" rx="10" class="fs"/>
+<text x="34" y="574" class="t">飞书演示群</text>
+<rect x="32" y="584" width="206" height="68" rx="6" class="box"/>
+<text x="44" y="603" class="ti">应用机器人</text>
+<text x="44" y="621" class="xs">企业自建应用，群内唯一机器人</text>
+<text x="44" y="639" class="xs">接收 @ 消息 · 以应用身份发消息</text>
+<text x="34" y="676" class="s">· 告警卡片（红）</text>
+<text x="34" y="696" class="s">· 开始调查卡片（蓝）</text>
+<text x="34" y="716" class="s">· 根因分析卡片（绿）</text>
+<text x="34" y="736" class="s">· 告警恢复卡片（绿）</text>
+<text x="34" y="756" class="s">· @机器人 问答（话题内多轮）</text>
+<text x="34" y="784" class="xs">卡片附 Web App 调查链接</text>
+
+<!-- col1 ① workload -->
+<rect x="290" y="60" width="300" height="250" rx="10" class="grp"/>
+<text x="304" y="84" class="t">① 模拟业务：订单服务</text>
+<rect x="304" y="96" width="272" height="44" rx="6" class="box"/>
+<text x="316" y="115" class="ti">EventBridge 定时规则（每分钟）</text>
+<text x="316" y="132" class="code">aiops-demo-traffic：20 次/分钟</text>
+<rect x="304" y="150" width="272" height="44" rx="6" class="box"/>
+<text x="316" y="169" class="ti">Lambda：aiops-demo-order-service</text>
+<text x="316" y="186" class="code">ORDERS_TABLE · APP_VERSION</text>
+<rect x="304" y="204" width="272" height="44" rx="6" class="box"/>
+<text x="316" y="223" class="s">DynamoDB aiops-demo-orders</text>
+<text x="316" y="240" class="s">SSM 参数：当前发布版本</text>
+<rect x="304" y="258" width="272" height="42" rx="6" class="fault"/>
+<text x="316" y="276" class="red">故障：发布 1.4.0</text>
+<text x="316" y="293" class="xs">ORDERS_TABLE → 不存在的 aiops-demo-orders-v2</text>
+<path d="M440,140 V148" class="ln" marker-end="url(#a)"/>
+<path d="M440,194 V202" class="ln" marker-end="url(#a)"/>
+
+<!-- col1 ② alert -->
+<rect x="290" y="335" width="300" height="190" rx="10" class="grp"/>
+<text x="304" y="359" class="t">② 告警转换</text>
+<rect x="304" y="371" width="272" height="44" rx="6" class="box"/>
+<text x="316" y="390" class="ti">CloudWatch 告警：Errors ≥ 5/分钟</text>
+<text x="316" y="407" class="code">→ SNS aiops-demo-alerts</text>
+<rect x="304" y="425" width="272" height="88" rx="6" class="box"/>
+<text x="316" y="444" class="ti">Lambda：alert-forwarder</text>
+<text x="316" y="463" class="s">· 告警 → Webhook 载荷，HMAC 签名</text>
+<text x="316" y="481" class="s">· DynamoDB 去重收敛（15 分钟）</text>
+<text x="316" y="499" class="s">· 告警 / 恢复卡片 → 飞书</text>
+<path d="M440,415 V423" class="ln" marker-end="url(#a)"/>
+<path d="M540,310 V369" class="ln" marker-end="url(#a)"/>
+<text x="546" y="330" class="lbl">指标</text>
+
+<!-- col1 ③ feishu integration -->
+<rect x="290" y="550" width="300" height="250" rx="10" class="grp"/>
+<text x="304" y="574" class="t">③ 飞书集成</text>
+<rect x="304" y="586" width="272" height="72" rx="6" class="box"/>
+<text x="316" y="605" class="ti">ECS Fargate：aiops-demo-feishu-ws</text>
+<text x="316" y="623" class="s">长连接客户端（lark-oapi，ARM64）</text>
+<text x="316" y="641" class="xs">安全组无入站规则 · 出站仅 443</text>
+<rect x="304" y="668" width="272" height="56" rx="6" class="box"/>
+<text x="316" y="687" class="ti">Lambda：chat-worker</text>
+<text x="316" y="706" class="s">A2A：chat / investigation</text>
+<rect x="304" y="734" width="272" height="56" rx="6" class="box"/>
+<text x="316" y="753" class="ti">Lambda：feishu-notifier</text>
+<text x="316" y="772" class="s">EventBridge 事件 → 调查摘要卡片</text>
+<path d="M440,658 V666" class="ln" marker-end="url(#a)"/>
+
+<!-- col2 agent -->
+<rect x="650" y="60" width="280" height="740" rx="10" class="agent"/>
+<text x="664" y="84" class="t">AWS DevOps Agent</text>
+<text x="664" y="103" class="xs">Agent Space：aiops-demo（中文）</text>
+<rect x="664" y="112" width="252" height="50" rx="6" class="box"/>
+<text x="676" y="132" class="ti">原生数据源（只读角色）</text>
+<text x="676" y="150" class="xs">CloudWatch · CloudTrail · Lambda 等</text>
+<rect x="664" y="172" width="252" height="66" rx="6" class="box"/>
+<text x="676" y="192" class="ti">Skill：order-service-release-rca</text>
+<text x="676" y="210" class="xs">ES 错误摘要 → CloudTrail 子任务</text>
+<text x="676" y="226" class="xs">→ Nexus 发布说明 → list_tables 核对</text>
+<rect x="664" y="248" width="252" height="66" rx="6" class="box"/>
+<text x="676" y="268" class="ti">MCP 工具（4 个，READ_ONLY）</text>
+<text x="676" y="286" class="code">es_error_summary · es_search_logs</text>
+<text x="676" y="302" class="code">nexus_list_versions · nexus_get_release</text>
+<rect x="664" y="324" width="252" height="50" rx="6" class="box"/>
+<text x="676" y="344" class="ti">Web App</text>
+<text x="676" y="362" class="xs">调查日志：工具调用与推理过程</text>
+<rect x="664" y="420" width="252" height="50" rx="6" class="box"/>
+<text x="676" y="440" class="ti">通用 Webhook（HMAC）</text>
+<text x="676" y="458" class="xs">告警创建调查；恢复时标记 resolved</text>
+<rect x="664" y="490" width="252" height="66" rx="6" class="box"/>
+<text x="676" y="510" class="ti">调查流程</text>
+<text x="676" y="528" class="xs">Triage → RCA → Mitigation（处置建议）</text>
+<text x="676" y="544" class="xs">自主调查只执行只读操作</text>
+<rect x="664" y="670" width="252" height="50" rx="6" class="box"/>
+<text x="676" y="690" class="ti">A2A 端点（SigV4）</text>
+<text x="676" y="708" class="code">connect.aidevops.us-east-1.api.aws</text>
+<rect x="664" y="736" width="252" height="50" rx="6" class="box"/>
+<text x="676" y="756" class="ti">EventBridge（aws.aidevops）</text>
+<text x="676" y="774" class="xs">Created / Completed / Failed / Mitigation</text>
+
+<!-- col3 MCP -->
+<rect x="990" y="60" width="390" height="250" rx="10" class="mcp"/>
+<text x="1004" y="84" class="t">es-mock MCP（Elasticsearch 替身）</text>
+<rect x="1004" y="96" width="362" height="92" rx="6" class="box"/>
+<text x="1016" y="115" class="ti">Amazon Bedrock AgentCore Runtime</text>
+<text x="1016" y="134" class="s">FastMCP 1.30.0 · 直接代码部署（arm64）</text>
+<text x="1016" y="153" class="s">JWT 授权器 ← Amazon Cognito（机器对机器）</text>
+<text x="1016" y="172" class="xs">认证：OAuth client credentials</text>
+<rect x="1004" y="198" width="362" height="100" rx="6" class="box"/>
+<text x="1016" y="217" class="ti">数据：CloudWatch Logs Insights</text>
+<text x="1016" y="236" class="s">查询 order-service 日志，返回 Elasticsearch</text>
+<text x="1016" y="254" class="s">_search 风格结果（hits / aggregations）</text>
+<text x="1016" y="273" class="xs">执行角色只能查询这一个日志组</text>
+<text x="1016" y="290" class="xs">查询文本限定安全字符集（防注入）</text>
+
+<rect x="990" y="335" width="390" height="190" rx="10" class="mcp"/>
+<text x="1004" y="359" class="t">nexus-mock MCP（Nexus 替身）</text>
+<rect x="1004" y="371" width="362" height="72" rx="6" class="box"/>
+<text x="1016" y="390" class="ti">AWS Lambda + 函数 URL（AWS_IAM）</text>
+<text x="1016" y="409" class="s">SigV4：DevOps Agent 扮演专用调用角色</text>
+<text x="1016" y="428" class="xs">未签名请求返回 403，函数代码不执行</text>
+<rect x="1004" y="453" width="362" height="60" rx="6" class="box"/>
+<text x="1016" y="472" class="ti">数据：静态发布说明 + SSM 版本</text>
+<text x="1016" y="491" class="s">1.4.0 已知问题：建表迁移尚未执行</text>
+
+<!-- col3 shared -->
+<rect x="990" y="550" width="390" height="250" rx="10" class="grp"/>
+<text x="1004" y="574" class="t">共享资源</text>
+<rect x="1004" y="584" width="362" height="88" rx="6" class="box"/>
+<text x="1016" y="603" class="ti">DynamoDB aiops-demo-state（TTL 自动过期）</text>
+<text x="1016" y="622" class="code">alarm#     告警去重 15 分钟</text>
+<text x="1016" y="638" class="code">feishu-msg# 消息去重 1 天</text>
+<text x="1016" y="654" class="code">conv# 会话 2 小时 · task# 调查↔话题 1 天</text>
+<rect x="1004" y="680" width="176" height="110" rx="6" class="box"/>
+<text x="1016" y="699" class="ti">Secrets Manager</text>
+<text x="1016" y="718" class="code">…/devops-agent-webhook</text>
+<text x="1016" y="734" class="code">…/feishu</text>
+<text x="1016" y="760" class="xs">setup-secrets.sh 录入</text>
+<text x="1016" y="777" class="xs">值不出现在命令行与日志</text>
+<rect x="1190" y="680" width="176" height="110" rx="6" class="box"/>
+<text x="1202" y="699" class="ti">S3 制品桶 · 日志</text>
+<text x="1202" y="718" class="xs">Lambda 代码包</text>
+<text x="1202" y="734" class="xs">es-mock / feishu-ws zip</text>
+<text x="1202" y="750" class="xs">（按内容哈希命名）</text>
+<text x="1202" y="766" class="xs">已开启 S3 阻止公有访问</text>
+<text x="1202" y="782" class="xs">日志保留 7 天</text>
+
+<!-- arrows -->
+<path d="M250,279 H302" class="ln" marker-end="url(#a)"/>
+<path d="M664,137 H592" class="dash" marker-end="url(#a)"/>
+<text x="598" y="129" class="lbl">只读</text>
+<path d="M576,445 H662" class="ln" marker-end="url(#a)"/>
+<text x="590" y="437" class="lbl">HMAC</text>
+<path d="M304,500 H270 V600 H252" class="ln" marker-end="url(#a)"/>
+<text x="258" y="536" class="lbl">卡片</text>
+<path d="M250,630 H302" class="ln" marker-end="url(#a)"/>
+<text x="256" y="622" class="lbl">@消息</text>
+<text x="256" y="646" class="xs">长连接</text>
+<path d="M576,696 H662" class="ln" marker-end="url(#a)"/>
+<text x="590" y="688" class="lbl">SigV4</text>
+<path d="M304,700 H252" class="ln" marker-end="url(#a)"/>
+<text x="258" y="692" class="lbl">回复</text>
+<path d="M664,761 H578" class="ln" marker-end="url(#a)"/>
+<text x="596" y="753" class="lbl">事件</text>
+<path d="M304,766 H252" class="ln" marker-end="url(#a)"/>
+<text x="258" y="758" class="lbl">卡片</text>
+<path d="M916,268 H1002" class="ln" marker-end="url(#a)"/>
+<text x="930" y="260" class="lbl">OAuth</text>
+<path d="M916,296 H950 V407 H1002" class="ln" marker-end="url(#a)"/>
+<text x="956" y="398" class="lbl">SigV4</text>
+
+<text x="20" y="836" class="xs">实线箭头为请求方向，虚线为只读数据访问。所有入口都要认证（HMAC、SigV4、OAuth 或飞书应用凭证）；飞书事件由 Fargate 客户端主动出站连接接收，栈内没有公网回调地址。</text>
+</svg>

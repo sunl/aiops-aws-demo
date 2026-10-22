@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="940" viewBox="0 0 1400 940" font-family="'Noto Sans CJK SC','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif">
+<style>
+.bg{fill:#FFFFFF}
+.hd{fill:#F1F5F9;stroke:#94A3B8;stroke-width:1.2}
+.hdA{fill:#FFF7EB;stroke:#FF9900;stroke-width:1.6}
+.hdF{fill:#EEF4FF;stroke:#3370FF;stroke-width:1.4}
+.life{stroke:#CBD5E1;stroke-width:1.4;stroke-dasharray:4 4}
+.band{fill:#F8FAFC;stroke:none}
+.t{fill:#111827;font-size:13px;font-weight:700}
+.sub{fill:#4B5563;font-size:11px}
+.msg{fill:#1F2937;font-size:12px}
+.num{fill:#FFFFFF;font-size:11px;font-weight:700}
+.sec{fill:#0F172A;font-size:14px;font-weight:700}
+.note{fill:#4B5563;font-size:11px}
+.h{fill:#0F172A;font-size:19px;font-weight:700}
+.ln{stroke:#334155;stroke-width:1.5;fill:none}
+.rt{stroke:#334155;stroke-width:1.3;fill:none;stroke-dasharray:5 4}
+.mk{fill:#334155}
+.dot{fill:#334155}
+.act{fill:#FDE68A;stroke:#B45309;stroke-width:1}
+</style>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" class="mk"/></marker></defs>
+<rect width="1400" height="940" class="bg"/>
+<text x="20" y="34" class="h">关键交互时序：告警自动调查 · 飞书问答</text>
+
+<!-- lifeline heads: x centers 90 260 430 600 790 980 1150 1320 -->
+<rect x="20" y="52" width="140" height="48" rx="6" class="hd"/><text x="90" y="72" class="t" text-anchor="middle">业务 / 告警</text><text x="90" y="90" class="sub" text-anchor="middle">CloudWatch · SNS</text>
+<rect x="190" y="52" width="140" height="48" rx="6" class="hd"/><text x="260" y="72" class="t" text-anchor="middle">告警转换</text><text x="260" y="90" class="sub" text-anchor="middle">Lambda + DynamoDB</text>
+<rect x="360" y="52" width="140" height="48" rx="6" class="hdF"/><text x="430" y="72" class="t" text-anchor="middle">飞书群</text><text x="430" y="90" class="sub" text-anchor="middle">应用机器人</text>
+<rect x="530" y="52" width="140" height="48" rx="6" class="hd"/><text x="600" y="72" class="t" text-anchor="middle">长连接客户端</text><text x="600" y="90" class="sub" text-anchor="middle">ECS Fargate</text>
+<rect x="710" y="52" width="160" height="48" rx="6" class="hd"/><text x="790" y="72" class="t" text-anchor="middle">问答 / 通知</text><text x="790" y="90" class="sub" text-anchor="middle">chat-worker · notifier</text>
+<rect x="900" y="52" width="160" height="48" rx="6" class="hdA"/><text x="980" y="72" class="t" text-anchor="middle">AWS DevOps Agent</text><text x="980" y="90" class="sub" text-anchor="middle">Webhook · A2A · 事件</text>
+<rect x="1080" y="52" width="140" height="48" rx="6" class="hd"/><text x="1150" y="72" class="t" text-anchor="middle">MCP Server</text><text x="1150" y="90" class="sub" text-anchor="middle">es-mock · nexus-mock</text>
+<rect x="1250" y="52" width="130" height="48" rx="6" class="hd"/><text x="1315" y="72" class="t" text-anchor="middle">原生数据源</text><text x="1315" y="90" class="sub" text-anchor="middle">CloudWatch 等</text>
+
+<path d="M90,100 V900" class="life"/><path d="M260,100 V900" class="life"/><path d="M430,100 V900" class="life"/><path d="M600,100 V900" class="life"/>
+<path d="M790,100 V900" class="life"/><path d="M980,100 V900" class="life"/><path d="M1150,100 V900" class="life"/><path d="M1315,100 V900" class="life"/>
+
+<!-- Flow A -->
+<rect x="10" y="112" width="1380" height="26" class="band"/>
+<text x="20" y="130" class="sec">流程 A：告警自动调查与结果推送（Demo 实测：告警约 1.5–2 分钟，调查约 6–8 分钟）</text>
+
+<circle cx="104" cy="160" r="9" class="dot"/><text x="104" y="164" class="num" text-anchor="middle">1</text>
+<path d="M90,170 H258" class="ln" marker-end="url(#a)"/><text x="118" y="164" class="msg">告警 ALARM（SNS）</text>
+
+<circle cx="274" cy="196" r="9" class="dot"/><text x="274" y="200" class="num" text-anchor="middle">2</text>
+<text x="290" y="200" class="msg">按告警名去重（15 分钟窗口内只建一个事件）</text>
+
+<circle cx="274" cy="232" r="9" class="dot"/><text x="274" y="236" class="num" text-anchor="middle">3</text>
+<path d="M260,244 H978" class="ln" marker-end="url(#a)"/><text x="290" y="238" class="msg">HMAC 签名的 Webhook（title / description / priority / incidentId）→ HTTP 200</text>
+
+<circle cx="274" cy="270" r="9" class="dot"/><text x="274" y="274" class="num" text-anchor="middle">4</text>
+<path d="M260,282 H432" class="ln" marker-end="url(#a)"/><text x="290" y="276" class="msg">告警卡片</text>
+
+<rect x="972" y="292" width="16" height="254" class="act"/>
+<circle cx="1000" cy="306" r="9" class="dot"/><text x="1000" y="310" class="num" text-anchor="middle">5</text>
+<path d="M972,318 H792" class="ln" marker-end="url(#a)"/><text x="806" y="312" class="msg">Investigation Created</text>
+<path d="M790,336 H432" class="ln" marker-end="url(#a)"/><text x="560" y="330" class="msg">开始调查卡片（附 Web App 链接）</text>
+
+<circle cx="1000" cy="362" r="9" class="dot"/><text x="1000" y="366" class="num" text-anchor="middle">6</text>
+<path d="M988,376 H1148" class="ln" marker-end="url(#a)"/><text x="1016" y="370" class="msg">es_error_summary</text>
+<path d="M1150,390 H990" class="rt" marker-end="url(#a)"/><text x="1016" y="406" class="note">错误类型、版本、首个错误时间</text>
+<path d="M988,440 H1313" class="ln" marker-end="url(#a)"/><text x="1160" y="434" class="msg">函数配置 · CloudTrail · list_tables</text>
+<path d="M1315,456 H990" class="rt" marker-end="url(#a)"/>
+<path d="M988,480 H1148" class="ln" marker-end="url(#a)"/><text x="1016" y="474" class="msg">nexus_get_release</text>
+<path d="M1150,496 H990" class="rt" marker-end="url(#a)"/><text x="1016" y="512" class="note">发布说明：前置迁移未执行</text>
+<text x="1000" y="536" class="note" text-anchor="start">Triage → RCA → Mitigation</text>
+
+<circle cx="1000" cy="560" r="9" class="dot"/><text x="1000" y="564" class="num" text-anchor="middle">7</text>
+<path d="M972,572 H792" class="ln" marker-end="url(#a)"/><text x="806" y="566" class="msg">Investigation Completed</text>
+<path d="M792,590 H972" class="ln" marker-end="url(#a)"/><text x="806" y="584" class="note">ListJournalRecords 读取摘要</text>
+<path d="M790,608 H432" class="ln" marker-end="url(#a)"/><text x="540" y="602" class="msg">根因分析卡片：根因 · 证据链 · 处置建议</text>
+
+<circle cx="104" cy="638" r="9" class="dot"/><text x="104" y="642" class="num" text-anchor="middle">8</text>
+<text x="120" y="642" class="msg">值班人员确认后人工回滚；告警恢复 OK → 转换 Lambda 标记 resolved 并推送恢复卡片</text>
+
+<!-- Flow B -->
+<rect x="10" y="666" width="1380" height="26" class="band"/>
+<text x="20" y="684" class="sec">流程 B：飞书 @机器人 问答（Demo 实测：回复约 30–55 秒）</text>
+
+<path d="M600,712 H432" class="ln" marker-end="url(#a)"/><text x="440" y="706" class="note">启动时主动建立长连接</text>
+<circle cx="444" cy="736" r="9" class="dot"/><text x="444" y="740" class="num" text-anchor="middle">1</text>
+<path d="M430,748 H598" class="ln" marker-end="url(#a)"/><text x="460" y="742" class="msg">@消息事件</text>
+
+<circle cx="614" cy="768" r="9" class="dot"/><text x="614" y="772" class="num" text-anchor="middle">2</text>
+<text x="630" y="772" class="msg">群白名单 · 按 message_id 去重 · 3 秒内处理完毕</text>
+<path d="M600,794 H788" class="ln" marker-end="url(#a)"/><text x="626" y="810" class="note">异步调用 Lambda（Event）</text>
+
+<circle cx="804" cy="818" r="9" class="dot"/><text x="804" y="822" class="num" text-anchor="middle">3</text>
+<path d="M790,830 H978" class="ln" marker-end="url(#a)"/><text x="820" y="824" class="msg">A2A message:send（chat）</text>
+<path d="M980,848 H792" class="rt" marker-end="url(#a)"/><text x="820" y="864" class="note">回答 + taskId（存入 DynamoDB，续接多轮）</text>
+
+<circle cx="804" cy="884" r="9" class="dot"/><text x="804" y="888" class="num" text-anchor="middle">4</text>
+<path d="M790,894 H432" class="ln" marker-end="url(#a)"/><text x="470" y="888" class="msg">在原消息话题内回复卡片</text>
+<text x="1000" y="888" class="note">“调查 xxx” 走 investigation 模式，结果按流程 A 第 7 步回推</text>
+
+<text x="20" y="928" class="note">实线：请求；虚线：返回。时间为 Demo 环境（单服务、低流量）实测，生产环境的调查时长取决于数据量与可观测性覆盖度。</text>
+</svg>

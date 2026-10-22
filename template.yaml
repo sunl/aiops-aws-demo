@@ -1,0 +1,848 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  AIOps demo for AWS DevOps Agent: sample workload with fault injection, alarm
+  forwarding to the DevOps Agent webhook, a mock Nexus MCP server, Feishu
+  notifications and an optional Feishu Q&A bot. Deploy with ./deploy.sh.
+
+Parameters:
+  AgentSpaceId:
+    Type: String
+    AllowedPattern: "[a-zA-Z0-9-]{1,64}"
+    Description: DevOps Agent Agent Space ID used for the demo.
+  OperatorAppUrl:
+    Type: String
+    Default: ""
+    Description: DevOps Agent web app URL (button target on Feishu cards).
+  EnableChatBot:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
+    Description: Deploy the Feishu Q&A bot (needs a Feishu enterprise app).
+  FeishuBaseUrl:
+    Type: String
+    AllowedValues: ["https://open.feishu.cn", "https://open.larksuite.com"]
+    Default: "https://open.feishu.cn"
+  FeishuChatId:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(oc_[A-Za-z0-9]+)?$"
+    Description: >-
+      Optional demo group chat_id. When set (with app credentials), alert and RCA cards are
+      posted by the app bot instead of the custom bot webhook, so the group needs only one bot.
+  TrafficEnabled:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+  EnableAgentCoreMcp:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+    Description: Deploy the mock Elasticsearch MCP server on AgentCore Runtime (OAuth via Cognito).
+  ArtifactBucket:
+    Type: String
+    Default: ""
+    Description: Bucket holding the AgentCore code package (set by deploy.sh).
+  EsMcpCodeKey:
+    Type: String
+    Default: ""
+    Description: S3 key of the es-mock code zip (content-hashed, set by deploy.sh).
+  FeishuWsCodeKey:
+    Type: String
+    Default: ""
+    Description: S3 key of the Feishu long-connection client bundle (content-hashed, set by deploy.sh).
+  FeishuWsVpcId:
+    Type: String
+    Default: ""
+    Description: VPC for the long-connection Fargate task (deploy.sh uses the default VPC).
+  FeishuWsSubnetIds:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: Subnets with an internet route for the Fargate task (outbound only; it gets a public IP, no inbound rules).
+  FeishuWsDesiredCount:
+    Type: Number
+    AllowedValues: [0, 1]
+    Default: 1
+    Description: 1 keeps the long connection online; 0 stops it without deleting anything.
+
+Conditions:
+  ChatBot: !Equals [!Ref EnableChatBot, "true"]
+  Traffic: !Equals [!Ref TrafficEnabled, "true"]
+  AgentCoreMcp: !Equals [!Ref EnableAgentCoreMcp, "true"]
+
+Rules:
+  AgentCoreMcpNeedsCodePackage:
+    RuleCondition: !Equals [!Ref EnableAgentCoreMcp, "true"]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref ArtifactBucket, ""]]
+        AssertDescription: ArtifactBucket is required when EnableAgentCoreMcp=true (deploy.sh sets it)
+      - Assert: !Not [!Equals [!Ref EsMcpCodeKey, ""]]
+        AssertDescription: EsMcpCodeKey is required when EnableAgentCoreMcp=true (deploy.sh sets it)
+  ChatBotNeedsFargateInputs:
+    RuleCondition: !Equals [!Ref EnableChatBot, "true"]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref FeishuWsCodeKey, ""]]
+        AssertDescription: FeishuWsCodeKey is required when EnableChatBot=true (deploy.sh sets it)
+      - Assert: !Not [!Equals [!Ref FeishuWsVpcId, ""]]
+        AssertDescription: FeishuWsVpcId is required when EnableChatBot=true (deploy.sh uses the default VPC)
+      - Assert: !Not [!Contains [!Ref FeishuWsSubnetIds, ""]]  # an empty list arrives as [""]
+        AssertDescription: FeishuWsSubnetIds is required when EnableChatBot=true
+
+Mappings:
+  Names:
+    Fn:
+      OrderService: aiops-demo-order-service
+      Traffic: aiops-demo-traffic
+      Forwarder: aiops-demo-alert-forwarder
+      NexusMcp: aiops-demo-nexus-mcp
+      Notifier: aiops-demo-feishu-notifier
+      ChatWorker: aiops-demo-chat-worker
+
+Resources:
+  # ---------------------------------------------------------------- shared
+  CommonLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      LayerName: aiops-demo-common
+      Description: demo_common helpers + pinned boto3 (devops-agent client)
+      Content: build/layer
+      CompatibleRuntimes: [python3.12]
+      CompatibleArchitectures: [arm64]
+
+  StateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: aiops-demo-state
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: pk, AttributeType: S}]
+      KeySchema: [{AttributeName: pk, KeyType: HASH}]
+      TimeToLiveSpecification: {AttributeName: ttl, Enabled: true}
+      SSESpecification: {SSEEnabled: true}
+
+  WebhookSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: aiops-demo/devops-agent-webhook
+      Description: DevOps Agent generic webhook URL and HMAC secret (set by scripts/setup-secrets.sh)
+      SecretString: '{"url":"","secret":""}'
+
+  FeishuSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: aiops-demo/feishu
+      Description: Feishu group bot webhook and optional app credentials (set by scripts/setup-secrets.sh)
+      SecretString: '{"group_webhook_url":"","group_webhook_secret":"","app_id":"","app_secret":"","verification_token":""}'
+
+  # -------------------------------------------------------------- workload
+  OrdersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: aiops-demo-orders
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: order_id, AttributeType: S}]
+      KeySchema: [{AttributeName: order_id, KeyType: HASH}]
+      SSESpecification: {SSEEnabled: true}
+
+  ReleaseParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /aiops-demo/release/order-service
+      Type: String
+      Description: Current order-service deployment (read by the mock Nexus MCP server)
+      Value: '{"deployed_version":"1.3.2","deployed_at":"2026-10-05T08:00:00Z","deployed_by":"ci-bot"}'
+
+  OrderServiceLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub ["/aws/lambda/${N}", {N: !FindInMap [Names, Fn, OrderService]}]
+      RetentionInDays: 7
+
+  OrderServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: sts:AssumeRole}]
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole]
+      Policies:
+        - PolicyName: orders
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Wildcard covers the v2 table name too, so the injected fault surfaces as
+              # ResourceNotFoundException (missing table) rather than AccessDenied.
+              - Effect: Allow
+                Action: [dynamodb:PutItem, dynamodb:GetItem]
+                Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/aiops-demo-orders*
+
+  OrderServiceFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: OrderServiceLogs
+    Properties:
+      FunctionName: !FindInMap [Names, Fn, OrderService]
+      Description: Demo order service (fault injected by scripts/inject-fault.sh)
+      Runtime: python3.12
+      Architectures: [arm64]
+      Handler: app.handler
+      Code: src/order_service
+      Role: !GetAtt OrderServiceRole.Arn
+      Timeout: 10
+      MemorySize: 256
+      Environment:
+        Variables:
+          ORDERS_TABLE: !Ref OrdersTable
+          APP_VERSION: "1.3.2"
+
+  TrafficLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub ["/aws/lambda/${N}", {N: !FindInMap [Names, Fn, Traffic]}]
+      RetentionInDays: 7
+
+  TrafficRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: sts:AssumeRole}]
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole]
+      Policies:
+        - PolicyName: invoke-order-service
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - {Effect: Allow, Action: lambda:InvokeFunction, Resource: !GetAtt OrderServiceFunction.Arn}
+
+  TrafficFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: TrafficLogs
+    Properties:
+      FunctionName: !FindInMap [Names, Fn, Traffic]
+      Description: Synthetic traffic for order-service
+      Runtime: python3.12
+      Architectures: [arm64]
+      Handler: app.handler
+      Code: src/traffic
+      Role: !GetAtt TrafficRole.Arn
+      Timeout: 60
+      Environment:
+        Variables:
+          TARGET_FUNCTION: !Ref OrderServiceFunction
+          REQUESTS_PER_RUN: "20"
+
+  TrafficSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: aiops-demo-traffic
+      ScheduleExpression: rate(1 minute)
+      State: !If [Traffic, ENABLED, DISABLED]
+      Targets: [{Id: traffic, Arn: !GetAtt TrafficFunction.Arn}]
+
+  TrafficPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref TrafficFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt TrafficSchedule.Arn
+
+  # ------------------------------------------------------- alarm -> agent
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: aiops-demo-alerts
+
+  ErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: aiops-demo-order-service-errors
+      AlarmDescription: "[P1] order-service 订单服务调用失败数异常（每分钟 >= 5 次）"
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{Name: FunctionName, Value: !Ref OrderServiceFunction}]
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  ForwarderLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub ["/aws/lambda/${N}", {N: !FindInMap [Names, Fn, Forwarder]}]
+      RetentionInDays: 7
+
+  ForwarderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: sts:AssumeRole}]
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole]
+      Policies:
+        - PolicyName: forwarder
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - {Effect: Allow, Action: secretsmanager:GetSecretValue, Resource: [!Ref WebhookSecret, !Ref FeishuSecret]}
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:DeleteItem]
+                Resource: !GetAtt StateTable.Arn
+
+  ForwarderFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: ForwarderLogs
+    Properties:
+      FunctionName: !FindInMap [Names, Fn, Forwarder]
+      Description: CloudWatch alarm -> DevOps Agent webhook (HMAC) + Feishu alert card
+      Runtime: python3.12
+      Architectures: [arm64]
+      Handler: app.handler
+      Code: src/alert_forwarder
+      Layers: [!Ref CommonLayer]
+      Role: !GetAtt ForwarderRole.Arn
+      Timeout: 60
+      Environment:
+        Variables:
+          WEBHOOK_SECRET_ID: !Ref WebhookSecret
+          FEISHU_SECRET_ID: !Ref FeishuSecret
+          FEISHU_BASE_URL: !Ref FeishuBaseUrl
+          FEISHU_CHAT_ID: !Ref FeishuChatId
+          STATE_TABLE: !Ref StateTable
+          SERVICE_NAME: order-service
+          ENVIRONMENT: demo
+          COLLAPSE_SECONDS: "900"
+
+  ForwarderSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref AlertTopic
+      Protocol: lambda
+      Endpoint: !GetAtt ForwarderFunction.Arn
+
+  ForwarderPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ForwarderFunction
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref AlertTopic
+
+  # ------------------------------------------------------ mock Nexus MCP
+  NexusMcpLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub ["/aws/lambda/${N}", {N: !FindInMap [Names, Fn, NexusMcp]}]
+      RetentionInDays: 7
+
+  NexusMcpRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: sts:AssumeRole}]
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole]
+      Policies:
+        - PolicyName: release-param
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ssm:GetParameter
+                Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/aiops-demo/release/order-service
+
+  NexusMcpFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: NexusMcpLogs
+    Properties:
+      FunctionName: !FindInMap [Names, Fn, NexusMcp]
+      Description: Mock Nexus MCP server (Streamable HTTP, read-only tools)
+      Runtime: python3.12
+      Architectures: [arm64]
+      Handler: app.handler
+      Code: src/nexus_mcp
+      Role: !GetAtt NexusMcpRole.Arn
+      Timeout: 15
+      Environment:
+        Variables:
+          RELEASE_PARAM: !Ref ReleaseParam
+
+  NexusMcpUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt NexusMcpFunction.Arn
+      AuthType: AWS_IAM
+
+  # Role that AWS DevOps Agent assumes to SigV4-sign calls to the MCP function URL.
+  McpInvokeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: aiops-demo-devops-agent-mcp-invoke
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: aidevops.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: {"aws:SourceAccount": !Ref "AWS::AccountId"}
+              ArnLike: {"aws:SourceArn": !Sub "arn:aws:aidevops:${AWS::Region}:${AWS::AccountId}:service/*"}
+      Policies:
+        - PolicyName: invoke-mcp-url
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [lambda:InvokeFunctionUrl, lambda:InvokeFunction]
+                Resource: !GetAtt NexusMcpFunction.Arn
+
+  # ------------------------------------- mock Elasticsearch MCP (AgentCore)
+  # OAuth 2.0 client credentials: DevOps Agent gets a token from Cognito and the
+  # AgentCore Runtime JWT authorizer validates it before the MCP server runs.
+  McpUserPool:
+    Type: AWS::Cognito::UserPool
+    Condition: AgentCoreMcp
+    Properties:
+      UserPoolName: aiops-demo-mcp
+      AdminCreateUserConfig: {AllowAdminCreateUserOnly: true}  # machine clients only, no sign-up
+
+  McpUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Condition: AgentCoreMcp
+    Properties:
+      UserPoolId: !Ref McpUserPool
+      Domain: !Sub aiops-demo-mcp-${AWS::AccountId}
+
+  McpResourceServer:
+    Type: AWS::Cognito::UserPoolResourceServer
+    Condition: AgentCoreMcp
+    Properties:
+      UserPoolId: !Ref McpUserPool
+      Identifier: es-mock
+      Name: es-mock
+      Scopes: [{ScopeName: read, ScopeDescription: Read-only log search}]
+
+  McpClient:
+    Type: AWS::Cognito::UserPoolClient
+    Condition: AgentCoreMcp
+    DependsOn: McpResourceServer
+    Properties:
+      UserPoolId: !Ref McpUserPool
+      ClientName: devops-agent-es-mock
+      GenerateSecret: true
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows: [client_credentials]
+      AllowedOAuthScopes: [es-mock/read]
+      AccessTokenValidity: 60
+      TokenValidityUnits: {AccessToken: minutes}
+
+  EsMcpRuntimeRole:
+    Type: AWS::IAM::Role
+    Condition: AgentCoreMcp
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: bedrock-agentcore.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: {"aws:SourceAccount": !Ref "AWS::AccountId"}
+              ArnLike: {"aws:SourceArn": !Sub "arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:*"}
+      Policies:
+        - PolicyName: agentcore-runtime-basics
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub arn:aws:s3:::${ArtifactBucket}/${EsMcpCodeKey}
+              - Effect: Allow
+                Action: [logs:CreateLogGroup, logs:DescribeLogStreams]
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/*
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/*:log-stream:*
+              - Effect: Allow
+                Action: logs:DescribeLogGroups
+                Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:*
+              - Effect: Allow
+                Action: [xray:PutTraceSegments, xray:PutTelemetryRecords, xray:GetSamplingRules, xray:GetSamplingTargets]
+                Resource: "*"
+              - Effect: Allow
+                Action: cloudwatch:PutMetricData
+                Resource: "*"
+                Condition: {StringEquals: {"cloudwatch:namespace": bedrock-agentcore}}
+              - Effect: Allow
+                Action: [bedrock-agentcore:GetWorkloadAccessToken, bedrock-agentcore:GetWorkloadAccessTokenForJWT]
+                Resource:
+                  - !Sub arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default
+                  - !Sub arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default/workload-identity/aiops_demo_es_mcp-*
+        - PolicyName: read-order-service-logs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: logs:StartQuery
+                Resource:
+                  - !GetAtt OrderServiceLogs.Arn
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:${OrderServiceLogs}
+              # GetQueryResults / StopQuery act on a query id and take no resource-level scoping.
+              - {Effect: Allow, Action: [logs:GetQueryResults, logs:StopQuery], Resource: "*"}
+
+  EsMcpRuntime:
+    Type: AWS::BedrockAgentCore::Runtime
+    Condition: AgentCoreMcp
+    Properties:
+      AgentRuntimeName: aiops_demo_es_mcp
+      Description: Mock Elasticsearch MCP server (FastMCP, stateless Streamable HTTP, read-only tools)
+      AgentRuntimeArtifact:
+        CodeConfiguration:
+          Code: {S3: {Bucket: !Ref ArtifactBucket, Prefix: !Ref EsMcpCodeKey}}
+          Runtime: PYTHON_3_12
+          EntryPoint: [main.py]
+      RoleArn: !GetAtt EsMcpRuntimeRole.Arn
+      NetworkConfiguration: {NetworkMode: PUBLIC}
+      ProtocolConfiguration: MCP
+      AuthorizerConfiguration:
+        CustomJWTAuthorizer:
+          DiscoveryUrl: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${McpUserPool}/.well-known/openid-configuration
+          AllowedClients: [!Ref McpClient]
+      EnvironmentVariables:
+        LOG_GROUPS: !Sub '{"order-service":"${OrderServiceLogs}"}'
+        LOGS_REGION: !Ref "AWS::Region"
+      LifecycleConfiguration: {IdleRuntimeSessionTimeout: 300, MaxLifetime: 3600}
+
+  # ------------------------------------------- agent events -> Feishu
+  NotifierLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub ["/aws/lambda/${N}", {N: !FindInMap [Names, Fn, Notifier]}]
+      RetentionInDays: 7
+
+  NotifierRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: sts:AssumeRole}]
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole]
+      Policies:
+        - PolicyName: notifier
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - {Effect: Allow, Action: secretsmanager:GetSecretValue, Resource: !Ref FeishuSecret}
+              - {Effect: Allow, Action: dynamodb:GetItem, Resource: !GetAtt StateTable.Arn}
+              - Effect: Allow
+                Action: [aidevops:ListJournalRecords, aidevops:GetBacklogTask]
+                Resource: !Sub arn:aws:aidevops:${AWS::Region}:${AWS::AccountId}:agentspace/${AgentSpaceId}
+
+  NotifierFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: NotifierLogs
+    Properties:
+      FunctionName: !FindInMap [Names, Fn, Notifier]
+      Description: DevOps Agent EventBridge events -> Feishu cards
+      Runtime: python3.12
+      Architectures: [arm64]
+      Handler: app.handler
+      Code: src/notifier
+      Layers: [!Ref CommonLayer]
+      Role: !GetAtt NotifierRole.Arn
+      Timeout: 60
+      Environment:
+        Variables:
+          AGENT_SPACE_ID: !Ref AgentSpaceId
+          OPERATOR_APP_URL: !Ref OperatorAppUrl
+          FEISHU_SECRET_ID: !Ref FeishuSecret
+          FEISHU_BASE_URL: !Ref FeishuBaseUrl
+          FEISHU_CHAT_ID: !Ref FeishuChatId
+          STATE_TABLE: !Ref StateTable
+          CHAT_BOT_ENABLED: !Ref EnableChatBot
+
+  NotifierRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: aiops-demo-devops-agent-events
+      EventPattern:
+        source: [aws.aidevops]
+        detail-type:
+          - Investigation Created
+          - Investigation Completed
+          - Investigation Failed
+          - Investigation Timed Out
+          - Investigation Cancelled
+          - Investigation Linked
+          - Investigation Skipped
+          - Mitigation Completed
+        detail:
+          metadata:
+            agent_space_id: [!Ref AgentSpaceId]
+      Targets: [{Id: notifier, Arn: !GetAtt NotifierFunction.Arn}]
+
+  NotifierPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref NotifierFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt NotifierRule.Arn
+
+  # ------------------------------------------ optional Feishu Q&A bot
+  ChatWorkerLogs:
+    Type: AWS::Logs::LogGroup
+    Condition: ChatBot
+    Properties:
+      LogGroupName: !Sub ["/aws/lambda/${N}", {N: !FindInMap [Names, Fn, ChatWorker]}]
+      RetentionInDays: 7
+
+  ChatWorkerRole:
+    Type: AWS::IAM::Role
+    Condition: ChatBot
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: sts:AssumeRole}]
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole]
+      Policies:
+        - PolicyName: chat-worker
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - {Effect: Allow, Action: secretsmanager:GetSecretValue, Resource: !Ref FeishuSecret}
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem]
+                Resource: !GetAtt StateTable.Arn
+              - Effect: Allow
+                Action:
+                  - aidevops:CreateChat
+                  - aidevops:SendMessage
+                  - aidevops:InitiateChat
+                  - aidevops:CreateBacklogTask
+                  - aidevops:GetBacklogTask
+                  - aidevops:ListBacklogTasks
+                Resource: !Sub arn:aws:aidevops:${AWS::Region}:${AWS::AccountId}:agentspace/${AgentSpaceId}
+
+  ChatWorkerFunction:
+    Type: AWS::Lambda::Function
+    Condition: ChatBot
+    DependsOn: ChatWorkerLogs
+    Properties:
+      FunctionName: !FindInMap [Names, Fn, ChatWorker]
+      Description: Feishu question -> DevOps Agent A2A (chat / investigation)
+      Runtime: python3.12
+      Architectures: [arm64]
+      Handler: app.handler
+      Code: src/chat_worker
+      Layers: [!Ref CommonLayer]
+      Role: !GetAtt ChatWorkerRole.Arn
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          AGENT_SPACE_ID: !Ref AgentSpaceId
+          A2A_REGION: !Ref "AWS::Region"
+          FEISHU_SECRET_ID: !Ref FeishuSecret
+          FEISHU_BASE_URL: !Ref FeishuBaseUrl
+          STATE_TABLE: !Ref StateTable
+
+  ChatWorkerInvokeConfig:
+    Type: AWS::Lambda::EventInvokeConfig
+    Condition: ChatBot
+    Properties:
+      FunctionName: !Ref ChatWorkerFunction
+      Qualifier: $LATEST
+      MaximumRetryAttempts: 0  # avoid duplicate replies in Feishu
+
+  # ------------------------------------------- Feishu long connection (Fargate)
+  # Feishu events reach the chat worker through the long-connection client
+  # (src/feishu_ws): it connects OUT to Feishu, so the stack exposes no public
+  # callback URL. No image build: a pinned aws-cli init container copies the
+  # content-hashed bundle (code + linux/arm64 wheels) from S3 into a shared
+  # volume, and a pinned python:3.12-slim container runs it.
+  FeishuWsCluster:
+    Type: AWS::ECS::Cluster
+    Condition: ChatBot
+    Properties:
+      ClusterName: aiops-demo
+      ClusterSettings: [{Name: containerInsights, Value: disabled}]
+
+  FeishuWsLogs:
+    Type: AWS::Logs::LogGroup
+    Condition: ChatBot
+    Properties:
+      LogGroupName: /ecs/aiops-demo-feishu-ws
+      RetentionInDays: 7
+
+  FeishuWsExecutionRole:
+    Type: AWS::IAM::Role
+    Condition: ChatBot
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition: {StringEquals: {"aws:SourceAccount": !Ref "AWS::AccountId"}}
+      Policies:
+        - PolicyName: logs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt FeishuWsLogs.Arn
+
+  FeishuWsTaskRole:
+    Type: AWS::IAM::Role
+    Condition: ChatBot
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Action: sts:AssumeRole
+            Condition: {StringEquals: {"aws:SourceAccount": !Ref "AWS::AccountId"}}
+      Policies:
+        - PolicyName: feishu-ws
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub arn:${AWS::Partition}:s3:::${ArtifactBucket}/${FeishuWsCodeKey}
+              - {Effect: Allow, Action: secretsmanager:GetSecretValue, Resource: !Ref FeishuSecret}
+              - {Effect: Allow, Action: dynamodb:PutItem, Resource: !GetAtt StateTable.Arn}
+              - {Effect: Allow, Action: lambda:InvokeFunction, Resource: !GetAtt ChatWorkerFunction.Arn}
+
+  FeishuWsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: ChatBot
+    Properties:
+      GroupDescription: aiops-demo Feishu long-connection client (outbound HTTPS only, no inbound)
+      VpcId: !Ref FeishuWsVpcId
+      # Amazon-provided DNS is not filtered by security groups, so HTTPS is the only rule needed.
+      SecurityGroupEgress:
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0, Description: "Feishu, S3, ECR Public, AWS APIs"}
+
+  FeishuWsTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Condition: ChatBot
+    Properties:
+      Family: aiops-demo-feishu-ws
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: "256"
+      Memory: "512"
+      RuntimePlatform: {OperatingSystemFamily: LINUX, CpuArchitecture: ARM64}
+      ExecutionRoleArn: !GetAtt FeishuWsExecutionRole.Arn
+      TaskRoleArn: !GetAtt FeishuWsTaskRole.Arn
+      Volumes: [{Name: app}]
+      ContainerDefinitions:
+        - Name: fetch
+          # pinned by digest; copies the bundle and exits
+          Image: public.ecr.aws/aws-cli/aws-cli:2.36.47@sha256:b94fc7612d131f1a3cb76145ba3385c813ad7561ef2c2b60c89fbd5dfee93d39
+          Essential: false
+          Command: [s3, cp, !Sub "s3://${ArtifactBucket}/${FeishuWsCodeKey}", /app/bundle.zip, --only-show-errors]
+          MountPoints: [{SourceVolume: app, ContainerPath: /app}]
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref FeishuWsLogs
+              awslogs-region: !Ref "AWS::Region"
+              awslogs-stream-prefix: fetch
+        - Name: client
+          Image: public.ecr.aws/docker/library/python:3.12.13-slim@sha256:229a2c5bfa27522db7815ea81f9bed70af17ccb9de9fc7ad142b1877b5830d36
+          Essential: true
+          DependsOn: [{ContainerName: fetch, Condition: SUCCESS}]
+          EntryPoint: [sh, -c]
+          Command: ["python -m zipfile -e /app/bundle.zip /app/src && exec python /app/src/client.py"]
+          MountPoints: [{SourceVolume: app, ContainerPath: /app}]
+          Environment:
+            - {Name: PYTHONPATH, Value: /app/src}
+            - {Name: PYTHONUNBUFFERED, Value: "1"}
+            - {Name: PYTHONDONTWRITEBYTECODE, Value: "1"}
+            - {Name: AWS_REGION, Value: !Ref "AWS::Region"}
+            - {Name: FEISHU_SECRET_ID, Value: !Ref FeishuSecret}
+            - {Name: FEISHU_BASE_URL, Value: !Ref FeishuBaseUrl}
+            - {Name: STATE_TABLE, Value: !Ref StateTable}
+            - {Name: WORKER_FUNCTION, Value: !Ref ChatWorkerFunction}
+            # Q&A is limited to the demo group when FeishuChatId is set
+            - {Name: ALLOWED_CHAT_IDS, Value: !Ref FeishuChatId}
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref FeishuWsLogs
+              awslogs-region: !Ref "AWS::Region"
+              awslogs-stream-prefix: client
+
+  FeishuWsService:
+    Type: AWS::ECS::Service
+    Condition: ChatBot
+    Properties:
+      ServiceName: aiops-demo-feishu-ws
+      Cluster: !Ref FeishuWsCluster
+      TaskDefinition: !Ref FeishuWsTaskDefinition
+      LaunchType: FARGATE
+      DesiredCount: !Ref FeishuWsDesiredCount
+      # Feishu delivers each event to one random connection, and the client de-duplicates
+      # on message_id, so a brief overlap during deployments is harmless.
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+        DeploymentCircuitBreaker: {Enable: true, Rollback: true}
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets: !Ref FeishuWsSubnetIds
+          SecurityGroups: [!Ref FeishuWsSecurityGroup]
+
+Outputs:
+  OrderServiceFunctionName:
+    Value: !Ref OrderServiceFunction
+  OrdersTableName:
+    Value: !Ref OrdersTable
+  AlarmName:
+    Value: !Ref ErrorsAlarm
+  NexusMcpUrl:
+    Description: Register this endpoint in DevOps Agent (scripts/register-mcp.sh)
+    Value: !GetAtt NexusMcpUrl.FunctionUrl
+  McpInvokeRoleArn:
+    Value: !GetAtt McpInvokeRole.Arn
+  EsMcpRuntimeArn:
+    Condition: AgentCoreMcp
+    Description: Register in DevOps Agent with scripts/register-mcp.sh (endpoint is derived from this ARN)
+    Value: !GetAtt EsMcpRuntime.AgentRuntimeArn
+  EsMcpRuntimeId:
+    Condition: AgentCoreMcp
+    Value: !GetAtt EsMcpRuntime.AgentRuntimeId
+  McpUserPoolId:
+    Condition: AgentCoreMcp
+    Value: !Ref McpUserPool
+  McpOAuthClientId:
+    Condition: AgentCoreMcp
+    Value: !Ref McpClient
+  McpOAuthTokenUrl:
+    Condition: AgentCoreMcp
+    Value: !Sub https://aiops-demo-mcp-${AWS::AccountId}.auth.${AWS::Region}.amazoncognito.com/oauth2/token
+  McpOAuthScope:
+    Condition: AgentCoreMcp
+    Value: es-mock/read
+  WebhookSecretName:
+    Value: aiops-demo/devops-agent-webhook
+  FeishuSecretName:
+    Value: aiops-demo/feishu
+  ChatWorkerFunctionName:
+    Condition: ChatBot
+    Description: Target of the Feishu long-connection client
+    Value: !Ref ChatWorkerFunction
+  FeishuWsService:
+    Condition: ChatBot
+    Description: ECS service running the Feishu long-connection client (logs in /ecs/aiops-demo-feishu-ws)
+    Value: !GetAtt FeishuWsService.Name

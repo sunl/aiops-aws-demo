@@ -1,0 +1,14 @@
+# build output (deploy.sh) and the packaged Skill zip
+build/
+dist/
+# local state of scripts/feishu-ws.sh (log, pid)
+.local/
+# virtual environments
+.venv/
+.venv-docs/
+.venv-esmcp/
+.venv-feishu-ws/
+__pycache__/
+*.pyc
+# Word lock files
+~$*
