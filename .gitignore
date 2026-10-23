@@ -11,5 +11,8 @@ dist/
 .venv-video/
 __pycache__/
 *.pyc
+# Word / PDF generated on demand by docs/build_docs.py (only Markdown is versioned)
+docs/*.docx
+docs/*.pdf
 # Word lock files
 ~$*

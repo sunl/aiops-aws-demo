@@ -4,6 +4,8 @@ AWS DevOps Agent × 飞书应用机器人的 AIOps 演示项目：用一个“�
 
 > 订单服务发布 1.4.0 → 调用大量失败 → CloudWatch 告警 → 飞书群收到告警卡片 → DevOps Agent 自动调查（读 CloudWatch、CloudTrail，并通过两个 MCP 查询“Elasticsearch 日志”和“Nexus 制品库”）→ 飞书群收到根因卡片 → 运维在飞书里 @机器人 追问 → 回滚 → 告警恢复卡片
 
+也可以在群里 @机器人 发送“调查 + 问题描述”主动发起调查，根因卡片回复到该消息的话题，示例见《03-部署手册》10.2。
+
 ## 文档
 
 | 文档 | 内容 |
@@ -11,8 +13,6 @@ AWS DevOps Agent × 飞书应用机器人的 AIOps 演示项目：用一个“�
 | [docs/01-方案说明.md](docs/01-方案说明.md) | 方案选型、目标架构、Demo 验证结果、先决条件、PoC 计划、费用 |
 | [docs/02-设计文档.md](docs/02-设计文档.md) | 组件、交互流程、详细设计、安全、可靠性与可观测性 |
 | [docs/03-部署手册.md](docs/03-部署手册.md) | 分步部署、飞书应用配置、验证、演练、清理与故障排查 |
-
-每份文档另有同名的 .docx 与 .pdf。
 
 ## 组件与对应关系
 
@@ -65,11 +65,11 @@ aiops-aws-demo/
 ├── tests/
 │   └── test_units.py               单元测试，40 个，不调用 AWS
 │
-└── docs/                           文档；每份 .md 另有同名 .docx / .pdf
+└── docs/                           文档（Markdown）
     ├── 01-方案说明.md              方案选型、目标架构、Demo 验证结果、PoC 计划
     ├── 02-设计文档.md              组件、交互流程、安全、可靠性与可观测性
     ├── 03-部署手册.md              分步部署（含飞书应用配置）、演练、排障
-    ├── build_docs.py               Markdown → Word，--pdf 时再转 PDF
+    ├── build_docs.py               按需生成 Word / PDF（不纳入版本库）
     ├── diagrams/                   架构图：SVG 为源文件，PNG 由脚本导出
     │   ├── architecture.svg        目标架构
     │   ├── demo-deployment.svg     Demo 部署架构
@@ -114,6 +114,8 @@ python3 scripts/test_es_mcp.py --local --endpoint http://127.0.0.1:8000/mcp
 ```
 
 ## 生成文档
+
+仓库只保存 Markdown。需要 Word / PDF 时再生成，输出在 `docs/` 下，已被 `.gitignore` 排除：
 
 ```bash
 python3.12 -m venv .venv-docs && .venv-docs/bin/pip install python-docx==1.2.0 lxml==6.1.3 typing_extensions==4.16.0
