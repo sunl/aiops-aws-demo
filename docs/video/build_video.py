@@ -137,6 +137,23 @@ td.mono{font-family:'DejaVu Sans Mono','Noto Sans Mono CJK SC',monospace;font-si
 .code .gap .src{color:#6E7681}
 .chip{position:absolute;right:96px;top:70px;background:#FF9900;color:#111827;font-weight:700;font-size:26px;
   border-radius:999px;padding:8px 26px}
+.frow{display:flex;align-items:stretch}
+.fcard{flex:none;background:#F8FAFC;border:2px solid #E2E8F0;border-radius:16px;padding:18px 22px;height:244px;overflow:hidden}
+.fcard.on{background:#FFF7EB;border-color:#FF9900;box-shadow:0 0 0 4px rgba(255,153,0,.18)}
+.fhead{display:flex;align-items:center;gap:14px;margin-bottom:8px}
+.fhead b{font-size:30px;line-height:1.25}
+.fnum{flex:none;width:44px;height:44px;border-radius:50%;background:#0F172A;color:#FFFFFF;font-size:24px;font-weight:700;
+  display:flex;align-items:center;justify-content:center}
+.fcard.on .fnum{background:#FF9900;color:#111827}
+.fwho{font-size:21px;color:#2F5BD3;margin-bottom:8px;font-family:'DejaVu Sans Mono','Noto Sans Mono CJK SC',monospace}
+.fdet{font-size:23px;line-height:1.5;color:#334155}
+.farr{flex:none;display:flex;align-items:center;justify-content:center}
+.ftime{display:flex;align-items:stretch;margin-top:20px;border:2px solid #E2E8F0;border-radius:12px;overflow:hidden}
+.ftime.on{border-color:#FF9900;box-shadow:0 0 0 4px rgba(255,153,0,.18)}
+.ftime .tl{flex:none;background:#0F172A;color:#FFFFFF;font-size:22px;font-weight:700;padding:12px 22px;display:flex;align-items:center}
+.ftime .seg{flex:1;background:#F1F5F9;padding:12px 22px;font-size:24px;color:#334155;border-left:2px solid #E2E8F0}
+.ftime.on .seg{background:#FFF7EB}
+.ftime .seg b{color:#D97706;margin-left:12px}
 .dark{background:radial-gradient(1200px 700px at 78% 18%,#1E3A66 0%,#0B1730 60%,#070F20 100%);color:#F8FAFC}
 """
 
@@ -492,6 +509,36 @@ def render_code(s, st, page, total):
     return frame(header(s, page, total) + f"<div class='body'><div class='panel-label'>▸ {esc(label)}</div>{block}</div>")
 
 
+def render_flow(s, st, page, total):
+    """Process steps as two rows of cards (row 2 continues row 1), then a timing strip and a note."""
+    hl = st["hl"]
+    nodes = s["nodes"]
+    per_row = math.ceil(len(nodes) / 2)
+    gap, link_h = 44, 44
+    card_w = (W - 2 * 96 - gap * (per_row - 1)) / per_row
+    arrow = (f"<div class='farr' style='width:{gap}px'><svg width='{gap}' height='24'>"
+             "<path d='M4,12 H32' stroke='#94A3B8' stroke-width='3'/><path d='M30,5 L41,12 L30,19z' fill='#94A3B8'/></svg></div>")
+
+    def row(items, offset):
+        cards = []
+        for i, (num, title, who, detail) in enumerate(items, offset):
+            cards.append(f"<div class='fcard{on_cls(i, hl)}' style='width:{card_w:.1f}px'>"
+                         f"<div class='fhead'><span class='fnum'>{esc(num)}</span><b>{esc(title)}</b></div>"
+                         f"<div class='fwho'>{esc(who)}</div><div class='fdet'>{esc(detail)}</div></div>")
+        return f"<div class='frow'>{arrow.join(cards)}</div>"
+
+    # elbow from the last card of row 1 down to the first card of row 2
+    x_end, x_start = (per_row - 1) * (card_w + gap) + card_w / 2, card_w / 2
+    link = (f"<svg width='{W - 2 * 96}' height='{link_h}' style='display:block'>"
+            f"<path d='M{x_end:.1f},0 V{link_h / 2} H{x_start:.1f} V{link_h - 10}' stroke='#94A3B8' stroke-width='3' fill='none'/>"
+            f"<path d='M{x_start - 7:.1f},{link_h - 12} L{x_start:.1f},{link_h} L{x_start + 7:.1f},{link_h - 12}z' fill='#94A3B8'/></svg>")
+    segs = "".join(f"<div class='seg'>{esc(k)}<b>{esc(v)}</b></div>" for k, v in s["timing"])
+    timing = f"<div class='ftime{on_cls('time', hl)}'><div class='tl'>{esc(s['timing_label'])}</div>{segs}</div>"
+    note = f"<div class='note{on_cls('note', hl)}' style='margin-top:20px;font-size:25px;line-height:1.5'>{esc(s['note'])}</div>"
+    return frame(header(s, page, total) + "<div class='body'>"
+                 + row(nodes[:per_row], 0) + link + row(nodes[per_row:], per_row) + timing + note + "</div>")
+
+
 def render_end(s, st, page, total):
     points = "".join(f"<div style='font-size:36px;margin:0 0 26px;display:flex;gap:22px'><span style='color:#FF9900'>✓</span>"
                      f"<span>{esc(p)}</span></div>" for p in s["points"])
@@ -506,7 +553,8 @@ def render_end(s, st, page, total):
 
 RENDER = {"cover": render_cover, "section": render_section, "agenda": render_agenda, "bullets": render_bullets,
           "columns": render_columns, "table": render_table, "stats": render_stats, "split": render_split,
-          "current": render_current, "diagram": render_diagram, "code": render_code, "end": render_end}
+          "current": render_current, "diagram": render_diagram, "code": render_code, "flow": render_flow,
+          "end": render_end}
 
 
 # ----------------------------------------------------------------------------- browser

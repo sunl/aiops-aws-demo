@@ -23,9 +23,6 @@ def R(start, end=None, before=0, after=0, elide=()):
 
 S1, S2, S3, S4 = "01 · 总体方案介绍", "02 · 设计说明", "03 · 架构说明", "04 · 代码介绍"
 
-# sequence-flows.svg: lifeline heads plus flow A (viewBox units), used to zoom in on flow A
-FLOW_A = (10, 44, 1380, 616)
-
 TREE = """aiops-aws-demo/
 ├── README.md                  项目说明与快速开始
 ├── template.yaml              CloudFormation 模板（全部资源）
@@ -212,6 +209,54 @@ SLIDES = [
         ],
     },
     {
+        "kind": "flow", "section": S2, "title": "告警触发与自动调查流程",
+        "nodes": [
+            ("1", "故障产生指标", "order-service · Lambda",
+             "先写结构化错误日志，再重新抛出异常，调用计为失败、计入 `Errors`"),
+            ("2", "告警进入 ALARM", "CloudWatch 告警 → SNS",
+             "Sum · 60 秒 · 1 个数据点 ≥ 5；缺数据视为未超阈值；ALARM / OK 都发 SNS"),
+            ("3", "去重收敛", "alert-forwarder · DynamoDB",
+             "条件写入 `alarm#<告警名>`（15 分钟）；写入失败即收敛返回"),
+            ("4", "签名调用 Webhook", "alert-forwarder → DevOps Agent",
+             "incident 载荷 + HMAC 签名；返回 200 后推送告警卡片"),
+            ("5", "创建调查", "DevOps Agent → EventBridge",
+             "发出 `Investigation Created`；notifier 推送“开始调查”卡片"),
+            ("6", "按 Skill 取证", "DevOps Agent · MCP",
+             "ES 错误摘要 → CloudTrail（子任务）→ Nexus 发布说明 → `list_tables`"),
+            ("7", "推送根因", "EventBridge → notifier",
+             "`Investigation Completed`；用 `ListJournalRecords` 读摘要，推送根因卡片"),
+            ("8", "人工回滚与恢复", "值班人员 · alert-forwarder",
+             "告警回到 OK；同一 incidentId 发 `resolved`，不新建调查；推送恢复卡片"),
+        ],
+        "timing": [("注入故障 → ALARM", "约 1.5–2 分钟"), ("ALARM → 调查开始", "约 13–14 秒"),
+                   ("调查开始 → 根因卡片", "约 6–8 分钟")],
+        "timing_label": "4 次演练实测",
+        "note": "为什么需要告警转换：SNS 的 HTTPS 订阅只按 SNS 自己的格式投递，生成不了 incident 载荷和 HMAC 签名；"
+                "调查上下文与去重也在这一层统一处理。告警平台能直接签名调用 Webhook 时，可省掉这一层。",
+        "steps": [
+            step("这一页把告警触发到自动调查的完整过程串起来，一共八步：业务故障产生指标，告警、去重、调用 Webhook，"
+                 "再到 DevOps Agent 调查、推送根因，最后人工回滚、告警恢复。", label="总览"),
+            step("第一步，故障要先变成指标。订单服务调用失败时，先写一条结构化错误日志，记下错误类型、版本和表名，"
+                 "再把异常重新抛出，这次调用才会计入 Lambda 的 Errors 指标。只记日志、不抛异常的话，指标不会变化，告警也不会触发。",
+                 hl=[0]),
+            step("第二步，CloudWatch 告警按 60 秒周期统计 Errors 的总数，只要 1 个数据点达到 5 次就进入 ALARM；"
+                 "没有数据时按未超阈值处理。ALARM 和 OK 两种状态都发到同一个 SNS 主题，告警和恢复走同一条链路。", hl=[1]),
+            step("第三步和第四步在告警转换 Lambda 里完成。先用 DynamoDB 条件写入按告警名去重，15 分钟内同一告警只建一个事件；"
+                 "写入成功后构造 incident 载荷，用 HMAC 签名调用 DevOps Agent 的 Webhook，返回 200 之后再推送告警卡片。", hl=[2, 3]),
+            step("为什么不让 SNS 直接调用 Webhook？SNS 的 HTTPS 订阅只按 SNS 自己的格式投递，生成不了 Webhook 要求的载荷和 HMAC 签名；"
+                 "调查上下文和去重也适合放在这一层统一处理。如果现有告警平台能按同样的格式签名调用 Webhook，生产环境可以省掉这一层。",
+                 hl=["note"]),
+            step("第五步，DevOps Agent 创建调查，向 EventBridge 发出 Investigation Created 事件，通知 Lambda 推送“开始调查”卡片。"
+                 "第六步，Agent 按 Skill 的顺序取证：ES 错误摘要、交给子任务查询的 CloudTrail 变更、Nexus 发布说明，"
+                 "最后用 list_tables 核对表是否存在。", hl=[4, 5]),
+            step("第七步，调查完成，发出 Investigation Completed 事件。事件只带记录 ID，通知 Lambda 用 ListJournalRecords 读取摘要，推送根因卡片。"
+                 "第八步，值班人员确认后人工回滚，告警回到 OK，告警转换用同一个 incidentId 发送 resolved，不会新建调查，并推送恢复卡片。",
+                 hl=[6, 7]),
+            step("按四次演练的实测，注入故障后约 1.5 到 2 分钟告警进入 ALARM，时间主要花在指标按分钟聚合和告警评估上；"
+                 "进入 ALARM 后约 13 到 14 秒调查开始；调查本身约 6 到 8 分钟。载荷和签名的细节，下一页展开。", hl=["time"]),
+        ],
+    },
+    {
         "kind": "split", "section": S2, "title": "告警接入设计",
         "left": [
             ("载荷", "Agent 只读取 title、description、priority 与事件 ID，关键上下文全部写入 description"),
@@ -378,15 +423,9 @@ SLIDES = [
     {
         "kind": "diagram", "section": S3, "title": "关键交互时序", "svg": "sequence-flows.svg",
         "steps": [
-            step("再看关键交互的时序：上半部分是告警自动调查，下半部分是飞书问答。", label="总览"),
-            step("告警进入 ALARM 后，转换 Lambda 先按告警名去重，再用 HMAC 签名调用 Webhook，收到 200 之后，向群里推送告警卡片。",
-                 label="A1–A4 告警触发", rects=[(18, 140, 1364, 150)], view=FLOW_A),
-            step("DevOps Agent 创建调查，通知 Lambda 推送“开始调查”卡片。Agent 按 Skill 的顺序取证：ES 错误摘要、CloudTrail 和函数配置、"
-                 "Nexus 发布说明，再用 list_tables 核对表是否存在。", label="A5–A6 调查取证",
-                 rects=[(18, 290, 1364, 258)], view=FLOW_A),
-            step("调查完成后，通知 Lambda 读取调查摘要，推送根因卡片。值班人员确认后人工回滚，告警恢复，"
-                 "转换 Lambda 把事件标记为已解决，并推送恢复卡片。", label="A7–A8 结论与恢复",
-                 rects=[(18, 548, 1364, 108)], view=FLOW_A),
+            step("再看关键交互的时序：上半部分是告警自动调查，第二部分已经逐步讲过，"
+                 "这张图可以对照各组件之间的调用顺序；下面重点看下半部分的飞书问答。",
+                 label="A 告警自动调查", rects=[(18, 112, 1364, 544)]),
             step("问答流程中，客户端启动时主动建立长连接。@ 消息到达后，3 秒内完成校验、去重和异步转交；"
                  "问答 Worker 调用 A2A 的 chat 模式，在原消息话题内回复，并把 taskId 存进 DynamoDB，延续多轮对话。"
                  "如果发的是“调查”加问题描述，就走 investigation 模式，结果按上面的流程回推到同一话题。",
