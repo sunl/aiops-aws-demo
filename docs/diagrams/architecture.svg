@@ -124,20 +124,18 @@
 <rect x="1010" y="275" width="370" height="325" rx="8" class="data"/>
 <text x="1024" y="298" class="t">自定义 MCP Server（只读工具）</text>
 <text x="1024" y="316" class="xs">Streamable HTTP · HTTPS · OAuth / API Key / SigV4 认证</text>
-<rect x="1022" y="326" width="346" height="84" rx="6" class="in"/>
-<text x="1034" y="346" class="ti">A. Amazon Bedrock AgentCore Runtime</text>
-<text x="1034" y="366" class="s">OAuth（JWT 授权器）· 标准 MCP SDK 基本不改</text>
-<text x="1034" y="386" class="s">适合：迁移现有 ES / Prometheus MCP Server</text>
-<text x="1034" y="402" class="xs">端点公网可达，必须认证</text>
-<rect x="1022" y="418" width="346" height="84" rx="6" class="in"/>
-<text x="1034" y="438" class="ti">B. AWS Lambda + 函数 URL</text>
-<text x="1034" y="458" class="s">SigV4（AWS_IAM 认证）· 适配 Lambda 请求模型</text>
-<text x="1034" y="478" class="s">适合：新写的轻量只读工具（如 Nexus 查询）</text>
-<text x="1034" y="494" class="xs">端点公网可达，必须认证</text>
-<rect x="1022" y="510" width="346" height="80" rx="6" class="in"/>
-<text x="1034" y="530" class="ti">C. Amazon ECS + 私有连接（VPC Lattice）</text>
-<text x="1034" y="550" class="s">内部负载均衡 + TLS · 无公网端点</text>
-<text x="1034" y="570" class="s">适合：安全基线要求“不得有公网可达端点”</text>
+<rect x="1022" y="328" width="346" height="124" rx="6" class="in"/>
+<text x="1034" y="352" class="ti">A. Amazon Bedrock AgentCore Runtime</text>
+<text x="1034" y="376" class="s">OAuth（JWT 授权器）· 标准 MCP SDK 基本不改</text>
+<text x="1034" y="398" class="s">适合：迁移现有 ES / Prometheus MCP Server</text>
+<text x="1034" y="420" class="s">Demo：es-mock（Amazon Cognito 签发令牌）</text>
+<text x="1034" y="441" class="xs">端点公网可达，必须认证</text>
+<rect x="1022" y="464" width="346" height="124" rx="6" class="in"/>
+<text x="1034" y="488" class="ti">B. AWS Lambda + 函数 URL</text>
+<text x="1034" y="512" class="s">SigV4（AWS_IAM 认证）· 适配 Lambda 请求模型</text>
+<text x="1034" y="534" class="s">适合：新写的轻量只读工具（如 Nexus 查询）</text>
+<text x="1034" y="556" class="s">Demo：nexus-mock（未签名请求返回 403）</text>
+<text x="1034" y="577" class="xs">端点公网可达，必须认证</text>
 
 <rect x="1010" y="622" width="370" height="78" rx="8" class="src"/>
 <text x="1024" y="645" class="t">现有数据后端</text>

@@ -8,6 +8,7 @@ dist/
 .venv-docs/
 .venv-esmcp/
 .venv-feishu-ws/
+.venv-video/
 __pycache__/
 *.pyc
 # Word lock files

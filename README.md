@@ -70,11 +70,14 @@ aiops-aws-demo/
     ├── 02-设计文档.md              组件、交互流程、安全、可靠性与可观测性
     ├── 03-部署手册.md              分步部署（含飞书应用配置）、演练、排障
     ├── build_docs.py               Markdown → Word，--pdf 时再转 PDF
-    └── diagrams/                   架构图：SVG 为源文件，PNG 由脚本导出
-        ├── architecture.svg        目标架构
-        ├── demo-deployment.svg     Demo 部署架构
-        ├── sequence-flows.svg      关键交互时序
-        └── export_png.sh           SVG → 2 倍 PNG
+    ├── diagrams/                   架构图：SVG 为源文件，PNG 由脚本导出
+    │   ├── architecture.svg        目标架构
+    │   ├── demo-deployment.svg     Demo 部署架构
+    │   ├── sequence-flows.svg      关键交互时序
+    │   └── export_png.sh           SVG → 2 倍 PNG
+    └── video/                      方案讲解视频的源文件，输出到 dist/video/
+        ├── slides.py               幻灯片内容、高亮与旁白
+        └── build_video.py          截图、Polly 配音、字幕、ffmpeg 合成
 ```
 
 AWS 资源统一使用 `aiops-demo` 前缀（栈名、函数名、Secret 名等），与项目目录名无关。
@@ -116,6 +119,15 @@ python3.12 -m venv .venv-docs && .venv-docs/bin/pip install python-docx==1.2.0 l
 ```
 
 修改架构图时编辑 `docs/diagrams/*.svg`，再运行 `docs/diagrams/export_png.sh` 重新导出 PNG。
+
+## 生成讲解视频
+
+```bash
+python3.12 -m venv .venv-video && .venv-video/bin/pip install imageio-ffmpeg==0.6.0 pygments==2.19.2
+AWS_PROFILE=<profile> .venv-video/bin/python docs/video/build_video.py   # 输出 dist/video/方案讲解.mp4 与 .srt
+```
+
+需要 playwright-cli、Noto Sans CJK 字体，以及有 `polly:SynthesizeSpeech` 权限的 AWS 凭证。截图和配音缓存在 `build/video/`，只改一页时只重做这一页。
 
 ## 安全要点
 
