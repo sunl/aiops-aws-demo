@@ -73,6 +73,8 @@ aiops-aws-demo/
     ├── diagrams/                   架构图：SVG 为源文件，PNG 由脚本导出
     │   ├── architecture.svg        目标架构
     │   ├── demo-deployment.svg     Demo 部署架构
+    │   ├── aws-architecture.svg    Demo 部署架构（AWS 官方图标版）
+    │   ├── aws_architecture.py     生成上一张图，需官方图标包
     │   ├── sequence-flows.svg      关键交互时序
     │   └── export_png.sh           SVG → 2 倍 PNG
     └── video/                      方案讲解视频的源文件，输出到 dist/video/
