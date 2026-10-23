@@ -1,8 +1,8 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  AIOps demo for AWS DevOps Agent: sample workload with fault injection, alarm
-  forwarding to the DevOps Agent webhook, a mock Nexus MCP server, Feishu
-  notifications and an optional Feishu Q&A bot. Deploy with ./deploy.sh.
+  order-service workload with alarm forwarding to the AWS DevOps Agent webhook,
+  Nexus and Elasticsearch MCP servers, Feishu notifications and an optional
+  Feishu Q&A bot. Deploy with ./deploy.sh.
 
 Parameters:
   AgentSpaceId:
@@ -179,7 +179,7 @@ Resources:
     DependsOn: OrderServiceLogs
     Properties:
       FunctionName: !FindInMap [Names, Fn, OrderService]
-      Description: Demo order service (fault injected by scripts/inject-fault.sh)
+      Description: order-service（订单服务）
       Runtime: python3.12
       Architectures: [arm64]
       Handler: app.handler

@@ -16,7 +16,7 @@ order-service 的调用失败数、错误日志或延迟出现异常，尤其是
 
 ## 排查步骤
 1. 用 `es_error_summary` 确认错误开始时间、错误类型、受影响的版本和表；需要原始日志时用 `es_search_logs`（`level=ERROR`），关注 `error_type`、`table`、`version` 字段。
-2. 核对异常开始前后对该函数的 `UpdateFunctionConfiguration` / `UpdateFunctionCode` 事件，列出变更前后的差异。CloudTrail 查询交给一个后台子任务执行（例如命名为 `cloudtrail-lambda-changes`，可与第 1、3 步并行）；主流程不要直接调用 `cloudtrail lookup_events`，主流程中它会被当作不允许的服务操作取消。子任务也查不到时不要重试，改用 Lambda 函数配置的 `LastModified` 和 Nexus 的部署记录作为变更时间依据，并在结论中注明这一缺口。
+2. 核对异常开始前后对该函数的配置和代码变更，列出变更前后的差异。CloudTrail 查询交给一个后台子任务执行（例如命名为 `cloudtrail-lambda-changes`，可与第 1、3 步并行）；子任务按资源名 `ResourceName=aiops-demo-order-service` 查询，不要按事件名精确过滤：Lambda 在 CloudTrail 中的事件名带 API 版本后缀，如 `UpdateFunctionConfiguration20150331v2`、`UpdateFunctionCode20150331v2`；事件也可能在操作后几分钟才能查到。主流程不要直接调用 `cloudtrail lookup_events`，主流程中它会被当作不允许的服务操作取消。子任务也查不到时不要重试，改用 Lambda 函数配置的 `LastModified` 和 Nexus 的部署记录作为变更时间依据，并在结论中注明这一缺口。
 3. 用 `nexus_list_versions` 确认当前部署的版本和部署时间，用 `nexus_get_release` 读取该版本的发布说明、配置变更、发布前置步骤和已知问题。
 4. 核对配置引用的资源是否真实存在。DynamoDB 表用只读的 `list_tables` 核对；不要调用 `describe_table`：自主调查中它会被当作需要审批的操作取消。
 5. 判断根因是否为“发布前置步骤未执行”或“配置与环境不一致”。
